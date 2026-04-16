@@ -13,6 +13,14 @@ on:
         description: "Set to true to force the validate job to fail"
         required: false
         default: "false"
+      lr_c:
+        description: "Logistic Regression C value (regularization)"
+        required: false
+        default: "1.0"
+      lr_max_iter:
+        description: "Logistic Regression max_iter"
+        required: false
+        default: "200"
 
 env:
   PYTHON_VERSION: "3.10"
@@ -84,7 +92,9 @@ jobs:
       - name: Train model and log to MLflow
         if: github.event.inputs.force_train_fail != 'true'
         env:
-          FORCE_ACCURACY: ${{ inputs.force_accuracy }}
+          FORCE_ACCURACY: ${{ github.event.inputs.force_accuracy }}
+          LR_C: ${{ github.event.inputs.lr_c }}
+          LR_MAX_ITER: ${{ github.event.inputs.lr_max_iter }}
         run: python train.py
 
       # ── Persist Run ID so the deploy job can find it ──────────

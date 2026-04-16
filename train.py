@@ -33,7 +33,11 @@ def main() -> None:
     with mlflow.start_run() as run:
         run_id = run.info.run_id
 
-        model = LogisticRegression(max_iter=200, random_state=42)
+        # Configurable hyperparameters
+        lr_c = float(os.getenv("LR_C", "1.0"))
+        lr_max_iter = int(os.getenv("LR_MAX_ITER", "200"))
+
+        model = LogisticRegression(C=lr_c, max_iter=lr_max_iter, random_state=42)
         model.fit(X_train, y_train)
 
         preds = model.predict(X_test)
@@ -44,6 +48,8 @@ def main() -> None:
             accuracy = float(forced_accuracy)
 
         mlflow.log_param("model", "LogisticRegression")
+        mlflow.log_param("C", lr_c)
+        mlflow.log_param("max_iter", lr_max_iter)
         mlflow.log_param("threshold", THRESHOLD_READY)
         mlflow.log_metric("accuracy", accuracy)
         mlflow.sklearn.log_model(model, artifact_path="model")
