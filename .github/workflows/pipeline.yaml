@@ -1,0 +1,171 @@
+name: Assignment 6 ML Pipeline
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      force_accuracy:
+        description: "Optional accuracy override for demo runs (e.g., 0.80 or 0.90)"
+        required: false
+        default: ""
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  # ══════════════════════════════════════════════════════════════
+  #  JOB 1 — LINTER  (Gatekeeper: lightweight, always runs first)
+  #  A broken codebase never reaches the expensive GPU/train step.
+  # ══════════════════════════════════════════════════════════════
+  linter:
+    name: "🔍 Lint Code"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Run flake8 linter
+        run: |
+          echo "Running flake8 linter..."
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          echo "Lint passed ✅"
+
+  # ══════════════════════════════════════════════════════════════
+  #  JOB 2 — VALIDATE  (the expensive "train" job)
+  #
+  #  Three-condition Gatekeeper (ALL must be true):
+  #    ① needs: linter           → broken code never reaches here
+  #    ② github.ref == 'main'    → only authorised branch
+  #    ③ commit msg has [run-train] → explicit developer intent
+  #
+  #  On success  → uploads model_info.txt for the deploy job
+  #  On failure  → writes & uploads error_logs.txt artifact
+  #  On always() → prints cleanup message
+  # ══════════════════════════════════════════════════════════════
+  validate:
+    name: "✅ Validate Model"
+    runs-on: ubuntu-latest
+    needs: linter
+
+    if: |
+      github.ref == 'refs/heads/main' &&
+      contains(github.event.head_commit.message, '[run-train]')
+
+    env:
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_EXPERIMENT_NAME: assignment6_pipeline
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mlflow scikit-learn dvc
+
+      - name: Pull dataset with DVC
+        run: dvc pull
+
+      - name: Train model and log to MLflow
+        env:
+          FORCE_ACCURACY: ${{ inputs.force_accuracy }}
+        run: python train.py
+
+      # ── Persist Run ID so the deploy job can find it ──────────
+      - name: Upload model_info artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-info
+          path: model_info.txt
+          if-no-files-found: error
+
+      # ── On failure: capture diagnostics and upload ────────────
+      - name: Write error_logs.txt
+        if: failure()
+        run: |
+          echo "=== TRAINING / VALIDATION FAILED ===" > error_logs.txt
+          echo "Timestamp : $(date -u)"                >> error_logs.txt
+          echo "Branch    : ${{ github.ref_name }}"    >> error_logs.txt
+          echo "Commit SHA: ${{ github.sha }}"          >> error_logs.txt
+          echo "Commit msg: ${{ github.event.head_commit.message }}" >> error_logs.txt
+          echo "Runner OS : ${{ runner.os }}"           >> error_logs.txt
+          echo ""                                       >> error_logs.txt
+          echo "See the Actions log above for the full Python traceback." >> error_logs.txt
+
+      - name: Upload error_logs.txt artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs
+          path: error_logs.txt
+
+      # ── Always: cleanup step (success OR failure) ─────────────
+      - name: Cleanup temporary cloud volumes
+        if: always()
+        run: echo "Cleaning up temporary cloud volumes..."
+
+  # ══════════════════════════════════════════════════════════════
+  #  JOB 3 — DEPLOY
+  #  Downloads Run ID artifact, checks accuracy threshold (≥ 0.85),
+  #  then performs a mock Docker build.
+  # ══════════════════════════════════════════════════════════════
+  deploy:
+    name: "🚀 Deploy Model"
+    runs-on: ubuntu-latest
+    needs: validate
+
+    env:
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mlflow
+
+      # Hand-off: retrieve model_info.txt from the validate job
+      - name: Download model_info artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model-info
+          path: .
+
+      # Fail the pipeline here if accuracy < 0.85
+      - name: Check accuracy threshold
+        run: python check_threshold.py
+
+      # Mock Docker build — passes the Run ID as a build ARG
+      - name: Build Docker image (mock)
+        run: |
+          RUN_ID=$(cat model_info.txt)
+          echo "Building Docker image for Run ID: ${RUN_ID}"
+          echo "docker build --build-arg RUN_ID=${RUN_ID} -t ml-model:${RUN_ID} ."
