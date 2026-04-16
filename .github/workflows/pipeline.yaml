@@ -14,12 +14,8 @@ env:
   PYTHON_VERSION: "3.10"
 
 jobs:
-  # ══════════════════════════════════════════════════════════════
-  #  JOB 1 — LINTER  (Gatekeeper: lightweight, always runs first)
-  #  A broken codebase never reaches the expensive GPU/train step.
-  # ══════════════════════════════════════════════════════════════
   linter:
-    name: "🔍 Lint Code"
+    name: "Lint Code"
     runs-on: ubuntu-latest
 
     steps:
@@ -41,22 +37,10 @@ jobs:
         run: |
           echo "Running flake8 linter..."
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          echo "Lint passed ✅"
+          echo "Lint passed"
 
-  # ══════════════════════════════════════════════════════════════
-  #  JOB 2 — VALIDATE  (the expensive "train" job)
-  #
-  #  Three-condition Gatekeeper (ALL must be true):
-  #    ① needs: linter           → broken code never reaches here
-  #    ② github.ref == 'main'    → only authorised branch
-  #    ③ commit msg has [run-train] → explicit developer intent
-  #
-  #  On success  → uploads model_info.txt for the deploy job
-  #  On failure  → writes & uploads error_logs.txt artifact
-  #  On always() → prints cleanup message
-  # ══════════════════════════════════════════════════════════════
   validate:
-    name: "✅ Validate Model"
+    name: "Validate Model"
     runs-on: ubuntu-latest
     needs: linter
 
@@ -119,18 +103,13 @@ jobs:
           name: error-logs
           path: error_logs.txt
 
-      # ── Always: cleanup step (success OR failure) ─────────────
       - name: Cleanup temporary cloud volumes
         if: always()
         run: echo "Cleaning up temporary cloud volumes..."
 
-  # ══════════════════════════════════════════════════════════════
-  #  JOB 3 — DEPLOY
-  #  Downloads Run ID artifact, checks accuracy threshold (≥ 0.85),
-  #  then performs a mock Docker build.
-  # ══════════════════════════════════════════════════════════════
+
   deploy:
-    name: "🚀 Deploy Model"
+    name: "Deploy Model"
     runs-on: ubuntu-latest
     needs: validate
 
@@ -155,18 +134,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install mlflow
 
-      # Hand-off: retrieve model_info.txt from the validate job
       - name: Download model_info artifact
         uses: actions/download-artifact@v4
         with:
           name: model-info
           path: .
 
-      # Fail the pipeline here if accuracy < 0.85
+
       - name: Check accuracy threshold
         run: python check_threshold.py
 
-      # Mock Docker build — passes the Run ID as a build ARG
       - name: Build Docker image (mock)
         run: |
           RUN_ID=$(cat model_info.txt)
