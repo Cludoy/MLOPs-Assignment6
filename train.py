@@ -14,8 +14,6 @@ THRESHOLD_READY = 0.85
 
 
 def main() -> None:
-    # Initialise DagsHub — sets the MLflow tracking URI and
-    # injects credentials from env vars automatically in CI.
     dagshub.init(
         repo_owner="Cludoy",
         repo_name="MLOPs-Assignment6",
@@ -41,7 +39,6 @@ def main() -> None:
         preds = model.predict(X_test)
         accuracy = accuracy_score(y_test, preds)
 
-        # Optional override for demo runs (set via workflow_dispatch input)
         forced_accuracy = os.getenv("FORCE_ACCURACY")
         if forced_accuracy is not None and forced_accuracy.strip():
             accuracy = float(forced_accuracy)
@@ -51,7 +48,6 @@ def main() -> None:
         mlflow.log_metric("accuracy", accuracy)
         mlflow.sklearn.log_model(model, artifact_path="model")
 
-        # Write Run ID — consumed by the deploy job via artifact hand-off
         Path("model_info.txt").write_text(run_id, encoding="utf-8")
 
         print(f"Run ID  : {run_id}")
