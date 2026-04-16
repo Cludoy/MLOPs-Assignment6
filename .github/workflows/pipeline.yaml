@@ -9,6 +9,10 @@ on:
         description: "Optional accuracy override for demo runs (e.g., 0.80 or 0.90)"
         required: false
         default: ""
+      force_train_fail:
+        description: "Set to true to force the validate job to fail"
+        required: false
+        default: "false"
 
 env:
   PYTHON_VERSION: "3.10"
@@ -71,7 +75,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install mlflow scikit-learn dagshub
 
+      - name: Force train failure for demo
+        if: github.event.inputs.force_train_fail == 'true'
+        run: |
+          echo "Simulating an out-of-memory error or code bug..."
+          exit 1
+
       - name: Train model and log to MLflow
+        if: github.event.inputs.force_train_fail != 'true'
         env:
           FORCE_ACCURACY: ${{ inputs.force_accuracy }}
         run: python train.py
